@@ -1,10 +1,12 @@
 import Vue from 'vue'
-export const USER_INFO_CACHE_KEY = USER_INFO_CACHE_KEY;
-
+export const USER_INFO_CACHE_KEY = '_userinfo_';
+export const USER_AUTHORIZE_CACHE_KEY = '_authorize_';
 const jwAuthorize = function(options) {
 	{
 		state: {
 			user: null,
+			//授权携带的数据信息
+			authorize: {}
 		},
 		mutations: {
 			login(state, user) {
@@ -15,35 +17,28 @@ const jwAuthorize = function(options) {
 				}
 				typeof options.mutations.login === 'function' && options.mutations.login(state, user);
 			},
+			// 授权信息进行处理
+			authorize(state, authorize) {
+				state.authorize = authorize
+				if (Vue.prototype.$cache && Vue.prototype.$cache.set) {
+					// 缓存用户信息
+					Vue.prototype.$cache.set(USER_AUTHORIZE_CACHE_KEY, authorize, 0)
+				}
+				typeof options.mutations.authorize === 'function' && options.mutations.authorize(state, authorize);
+			},
+			//用户退出操作
 			logout(state) {
-				state.user = null
+				state.user = null;
+				state.authorize = {};
 				// 清理缓存用户信息
 				if (Vue.prototype.$cache && Vue.prototype.$cache.delete) {
 					Vue.prototype.$cache.delete(USER_INFO_CACHE_KEY)
+					Vue.prototype.$cache.delete(USER_AUTHORIZE_CACHE_KEY)
 				}
 				typeof options.mutations.login === 'function' && options.mutations.logout(state);
 			}
 		},
 		actions: {
-			autoLogin({
-				commit,
-				getters,
-				dispatch
-			}) {
-				// 判断本地是否有账号信息，如果有，就自动重新登录
-				if (getters.user) {
-					dispatch('userRefresh').then(res => {
-						uni.hideLoading();
-					}).catch(e => {
-						uni.hideLoading();
-					});
-				}
-				typeof options.actions.autoLogin === 'function' && options.actions.autoLogin({
-					commit,
-					getters,
-					dispatch
-				});
-			},
 			//获取用户信息
 			getUser({
 				commit,
@@ -56,30 +51,21 @@ const jwAuthorize = function(options) {
 						getters,
 						dispatch,
 						resolve,
-						reject
+						reject,
+						next: (data) => {
+							commit('login', {
+								data,
+								scene: params.scene || 'GET'
+							});
+							commit('authorize', {
+								data,
+								scene: params.scene || 'GET'
+							});
+						}
 					});
 				})
 			},
-			//刷新用户信息
-			userRefresh({
-				commit,
-				getters,
-				dispatch
-			}, params) {
-				const cxt = this;
-				return new Promise((resolve, reject) => {
-					typeof options.actions.getUser === 'function' && options.actions.getUser({
-						commit,
-						getters,
-						dispatch,
-						resolve,
-						reject,
-						callback: (data) => {
-							commit('login', data)
-						}
-					});
-				});
-			},
+			// 请求登录
 			login({
 				commit,
 				getters,
@@ -92,8 +78,13 @@ const jwAuthorize = function(options) {
 						dispatch,
 						resolve,
 						reject,
-						callback: (data) => {
-							dispatch('getUser');
+						// 登录成功后调用callback执行后续操作
+						next: (data) => {
+							dispatch('getUser', data);
+							commit('authorize', {
+								data,
+								scene: 'LOGIN'
+							});
 						}
 					});
 				})
@@ -113,6 +104,7 @@ const jwAuthorize = function(options) {
 			}
 		},
 		getters: {
+			//用户信息
 			user: state => {
 				if (state.user) {
 					return state.user
@@ -120,7 +112,15 @@ const jwAuthorize = function(options) {
 				if (Vue.prototype.$cache && Vue.prototype.$cache.get) {
 					return Vue.prototype.$cache.get(USER_INFO_CACHE_KEY)
 				}
-
+			},
+			//授权信息
+			authorize: state => {
+				if (state.authorize) {
+					return state.authorize
+				}
+				if (Vue.prototype.$cache && Vue.prototype.$cache.get) {
+					return Vue.prototype.$cache.get(USER_AUTHORIZE_CACHE_KEY)
+				}
 			}
 		}
 	}
